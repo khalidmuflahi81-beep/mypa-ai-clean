@@ -1,5 +1,14 @@
-import React, { useRef, useState } from "react";
-import { View, Text, Pressable, StyleSheet, Platform } from "react-native";
+import React, { useEffect, useRef, useState } from "react";
+import {
+  View,
+  Text,
+  Pressable,
+  StyleSheet,
+  Platform,
+  Animated,
+  Easing,
+  ActivityIndicator,
+} from "react-native";
 import { Audio } from "expo-av";
 import * as Speech from "expo-speech";
 
@@ -51,22 +60,33 @@ async function pollJob(jobId) {
 
 export default function App() {
   const recRef = useRef(null);
+  const pulse = useRef(new Animated.Value(0)).current;
+  const pulseLoop = useRef(null);
 
   const [status, setStatus] = useState("Hold mic to record");
   const [debug, setDebug] = useState("");
   const [transcript, setTranscript] = useState("");
   const [reply, setReply] = useState("");
+  const [isRecording, setIsRecording] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
 
   const start = async () => {
+    if (isUploading || isTranscribing) return;
+
     try {
       setDebug("");
       setTranscript("");
       setReply("");
       setStatus("Requesting permission...");
+      setIsRecording(true);
+      setIsUploading(false);
+      setIsTranscribing(false);
 
       const perm = await Audio.requestPermissionsAsync();
       if (!perm.granted) {
         setStatus("Mic permission denied");
+        setIsRecording(false);
         return;
       }
 
@@ -88,10 +108,13 @@ export default function App() {
       setStatus("Recording error");
       setDebug(String(e?.message || e));
       recRef.current = null;
+      setIsRecording(false);
     }
   };
 
   const stop = async () => {
+    if (isUploading || isTranscribing) return;
+
     try {
       const rec = recRef.current;
       if (!rec) {
@@ -103,6 +126,7 @@ export default function App() {
       await rec.stopAndUnloadAsync();
       const uri = rec.getURI();
       recRef.current = null;
+      setIsRecording(false);
 
       if (!uri) {
         setStatus("No audio captured");
@@ -111,17 +135,21 @@ export default function App() {
 
       // ✅ New job-based flow
       setStatus("Uploading...");
+      setIsUploading(true);
       const startResp = await sendAudioToBackend(uri);
 
       if (startResp.error) throw new Error(startResp.error);
       if (!startResp.jobId) throw new Error("No jobId returned from backend");
 
       setStatus("Transcribing...");
+      setIsTranscribing(true);
       const result = await pollJob(startResp.jobId);
 
       setTranscript(result.transcript || "");
       setReply(result.reply || "");
       setStatus("Done ✅");
+      setIsUploading(false);
+      setIsTranscribing(false);
 
       if (result.reply) {
         Speech.stop();
@@ -130,6 +158,9 @@ export default function App() {
     } catch (e) {
       setStatus("Error");
       setDebug(String(e?.message || e));
+      setIsUploading(false);
+      setIsTranscribing(false);
+      setIsRecording(false);
     } finally {
       // Reset mode (helps iOS)
       try {
@@ -139,6 +170,61 @@ export default function App() {
         });
       } catch {}
     }
+  };
+
+  useEffect(() => {
+    if (isRecording) {
+      pulse.setValue(0);
+      const loop = Animated.loop(
+        Animated.sequence([
+          Animated.timing(pulse, {
+            toValue: 1,
+            duration: 900,
+            easing: Easing.out(Easing.ease),
+            useNativeDriver: true,
+          }),
+          Animated.timing(pulse, {
+            toValue: 0,
+            duration: 900,
+            easing: Easing.in(Easing.ease),
+            useNativeDriver: true,
+          }),
+        ])
+      );
+
+      loop.start();
+      pulseLoop.current = loop;
+    } else if (pulseLoop.current) {
+      pulseLoop.current.stop();
+      pulseLoop.current = null;
+      pulse.setValue(0);
+    }
+  }, [isRecording, pulse]);
+
+  const micColor = isRecording
+    ? "#ff4d6d"
+    : isUploading || isTranscribing
+    ? "#9aa3b2"
+    : "#00c9ff";
+
+  const rippleScale = pulse.interpolate({
+    inputRange: [0, 1],
+    outputRange: [1, 1.4],
+  });
+
+  const rippleOpacity = pulse.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.2, 0],
+  });
+
+  const handlePressIn = () => {
+    if (isUploading || isTranscribing || isRecording) return;
+    start();
+  };
+
+  const handlePressOut = () => {
+    if (isUploading || isTranscribing) return;
+    stop();
   };
 
   return (
@@ -155,9 +241,37 @@ export default function App() {
         <Text style={styles.body}>{reply || "..."}</Text>
       </View>
 
-      <Pressable onPressIn={start} onPressOut={stop} style={styles.mic}>
-        <Text style={styles.micText}>🎤</Text>
-      </Pressable>
+      <View style={styles.micWrapper}>
+        {isRecording && (
+          <Animated.View
+            pointerEvents="none"
+            style={[
+              styles.ripple,
+              { opacity: rippleOpacity, transform: [{ scale: rippleScale }] },
+            ]}
+          />
+        )}
+
+        <Pressable
+          onPressIn={handlePressIn}
+          onPressOut={handlePressOut}
+          style={({ pressed }) => [
+            styles.mic,
+            {
+              backgroundColor: micColor,
+              transform: [{ scale: pressed && !isUploading && !isTranscribing ? 0.96 : 1 }],
+              opacity: isUploading || isTranscribing ? 0.65 : 1,
+            },
+          ]}
+          disabled={isUploading || isTranscribing}
+        >
+          {isUploading || isTranscribing ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <Text style={styles.micText}>🎤</Text>
+          )}
+        </Pressable>
+      </View>
 
       <Text style={styles.status}>{status}</Text>
 
@@ -184,17 +298,28 @@ const styles = StyleSheet.create({
   },
   label: { fontSize: 12, opacity: 0.7, marginBottom: 6 },
   body: { fontSize: 16 },
+  micWrapper: { alignItems: "center", justifyContent: "center", marginTop: 10 },
   mic: {
-    alignSelf: "center",
-    marginTop: 10,
     width: 92,
     height: 92,
     borderRadius: 46,
     backgroundColor: "#00c9ff",
     alignItems: "center",
     justifyContent: "center",
+    elevation: 3,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 3,
   },
   micText: { fontSize: 36, color: "#fff" },
+  ripple: {
+    position: "absolute",
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: "#ff4d6d",
+  },
   status: { textAlign: "center", marginTop: 12, fontSize: 14, opacity: 0.75 },
   debug: { marginTop: 10, fontSize: 12, color: "#444" },
   hint: { marginTop: 10, fontSize: 12, opacity: 0.6, textAlign: "center" },
