@@ -180,55 +180,48 @@ export default function App() {
     }
   };
 
+  const statusTone = useMemo(() => deriveStatusTone(status), [status]);
+
   return (
     <View style={styles.container}>
       <View style={styles.content}>
-        <Text style={styles.title}>MyPA AI</Text>
+        <View style={styles.header}>
+          <Text style={styles.title}>MyPA AI</Text>
+          <Text style={styles.subtitle}>
+            Hold the mic to capture your voice, then review the transcript and
+            AI reply.
+          </Text>
+        </View>
 
-        <View style={styles.card}>
-          <Text style={styles.label}>Transcript</Text>
-          <Text style={styles.body}>{transcript || "..."}</Text>
-          <View style={styles.actions}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Copy transcript"
-              onPress={() => copyText(transcript, "Transcript")}
-              style={styles.actionButton}
-            >
-              <Text style={styles.actionText}>Copy</Text>
-            </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Share transcript"
-              onPress={() => shareText(transcript, "Transcript")}
-              style={styles.actionButton}
-            >
-              <Text style={styles.actionText}>Share</Text>
-            </Pressable>
+        <View style={styles.statusRow}>
+          <StatusBadge status={status} tone={statusTone} styles={styles} />
+          <View style={styles.statusMeta}>
+            <Text style={styles.metaLabel}>Mic tip</Text>
+            <Text style={styles.metaValue}>
+              {Platform.OS === "ios"
+                ? "Settings → Microphone → Expo Go must be ON"
+                : "App Permissions → Microphone must be Allowed"}
+            </Text>
           </View>
         </View>
 
-        <View style={styles.card}>
-          <Text style={styles.label}>Reply</Text>
-          <Text style={styles.body}>{reply || "..."}</Text>
-          <View style={styles.actions}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Copy reply"
-              onPress={() => copyText(reply, "Reply")}
-              style={styles.actionButton}
-            >
-              <Text style={styles.actionText}>Copy</Text>
-            </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Share reply"
-              onPress={() => shareText(reply, "Reply")}
-              style={styles.actionButton}
-            >
-              <Text style={styles.actionText}>Share</Text>
-            </Pressable>
-          </View>
+        <View style={styles.grid}>
+          <InfoCard
+            label="Transcript"
+            body={transcript}
+            placeholder="Your voice-to-text transcript will appear here."
+            onCopy={() => copyText(transcript, "Transcript")}
+            onShare={() => shareText(transcript, "Transcript")}
+            styles={styles}
+          />
+          <InfoCard
+            label="Reply"
+            body={reply}
+            placeholder="The AI response will show up once processing finishes."
+            onCopy={() => copyText(reply, "Reply")}
+            onShare={() => shareText(reply, "Reply")}
+            styles={styles}
+          />
         </View>
       </View>
 
@@ -242,22 +235,100 @@ export default function App() {
           style={({ pressed }) => [styles.mic, pressed && styles.micPressed]}
         >
           <Text style={styles.micText}>🎤</Text>
+          <Text style={styles.micLabel}>Hold to talk</Text>
         </Pressable>
 
-        <View style={styles.statusPill}>
-          <Text style={styles.status}>{status}</Text>
-        </View>
-
         {!!debug && <Text style={styles.debug}>Debug: {debug}</Text>}
-
-        <Text style={styles.hint}>
-          {Platform.OS === "ios"
-            ? "iPhone: Settings → Microphone → Expo Go must be ON"
-            : "Android: App Permissions → Microphone must be Allowed"}
-        </Text>
       </View>
     </View>
   );
+}
+
+function InfoCard({ label, body, placeholder, onCopy, onShare, styles }) {
+  const hasContent = Boolean(body);
+
+  return (
+    <View style={styles.card}>
+      <View style={styles.cardHeading}>
+        <Text style={styles.label}>{label}</Text>
+        <View style={styles.badge}>
+          <Text style={styles.badgeText}>{hasContent ? "Ready" : "Pending"}</Text>
+        </View>
+      </View>
+
+      <Text style={styles.body}>{body || placeholder}</Text>
+
+      <View style={styles.actions}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`Copy ${label.toLowerCase()}`}
+          onPress={onCopy}
+          disabled={!hasContent}
+          style={[
+            styles.actionButton,
+            !hasContent && styles.actionButtonDisabled,
+          ]}
+        >
+          <Text
+            style={[
+              styles.actionText,
+              !hasContent && styles.actionTextDisabled,
+            ]}
+          >
+            Copy
+          </Text>
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`Share ${label.toLowerCase()}`}
+          onPress={onShare}
+          disabled={!hasContent}
+          style={[
+            styles.actionButton,
+            !hasContent && styles.actionButtonDisabled,
+          ]}
+        >
+          <Text
+            style={[
+              styles.actionText,
+              !hasContent && styles.actionTextDisabled,
+            ]}
+          >
+            Share
+          </Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
+function StatusBadge({ status, tone, styles }) {
+  return (
+    <View style={[styles.statusPill, { backgroundColor: tone.background }]}>
+      <Text style={[styles.status, { color: tone.text }]}>
+        {tone.icon} {status}
+      </Text>
+    </View>
+  );
+}
+
+function deriveStatusTone(status) {
+  const normalized = status.toLowerCase();
+
+  if (normalized.includes("recording")) {
+    return { background: "#fff4e5", text: "#8a4500", icon: "⏺️" };
+  }
+  if (normalized.includes("upload") || normalized.includes("transcrib")) {
+    return { background: "#e8f0fe", text: "#0b1f33", icon: "⏳" };
+  }
+  if (normalized.includes("done")) {
+    return { background: "#e6f4ea", text: "#0f5132", icon: "✅" };
+  }
+  if (normalized.includes("error")) {
+    return { background: "#fdecea", text: "#8a1c1c", icon: "⚠️" };
+  }
+
+  return { background: "#eef2f7", text: "#0b1f33", icon: "🎙️" };
 }
 
 const createStyles = (fontScale) => {
@@ -274,20 +345,78 @@ const createStyles = (fontScale) => {
     },
     content: {
       flex: 1,
+      gap: scale(12),
+    },
+    header: {
+      gap: scale(6),
     },
     title: {
       fontSize: scale(24),
       fontWeight: "700",
-      marginBottom: scale(16),
+      marginBottom: scale(4),
       color: "#0b1f33",
+    },
+    subtitle: {
+      fontSize: scale(15),
+      lineHeight: scale(20),
+      color: "#243447",
+    },
+    statusRow: {
+      flexDirection: "row",
+      gap: scale(12),
+      alignItems: "center",
+    },
+    statusMeta: {
+      flex: 1,
+      backgroundColor: "#f4f6fa",
+      borderRadius: 12,
+      paddingHorizontal: scale(12),
+      paddingVertical: scale(10),
+      borderWidth: 1,
+      borderColor: "#e1e7ef",
+      gap: scale(4),
+    },
+    metaLabel: {
+      fontSize: scale(12),
+      color: "#6b7280",
+      fontWeight: "600",
+      letterSpacing: 0.2,
+    },
+    metaValue: {
+      fontSize: scale(14),
+      color: "#0b1f33",
+    },
+    grid: {
+      gap: scale(12),
     },
     card: {
       borderWidth: 1,
       borderColor: "#d0d7e2",
       borderRadius: 14,
       padding: scale(14),
-      marginBottom: scale(12),
       backgroundColor: "#f9fbff",
+      shadowColor: "#0b1f33",
+      shadowOpacity: 0.03,
+      shadowRadius: 12,
+      shadowOffset: { width: 0, height: 8 },
+      elevation: 2,
+    },
+    cardHeading: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      marginBottom: scale(4),
+    },
+    badge: {
+      borderRadius: 999,
+      backgroundColor: "#e8f0fe",
+      paddingHorizontal: scale(10),
+      paddingVertical: scale(4),
+    },
+    badgeText: {
+      fontSize: scale(12),
+      color: "#0b1f33",
+      fontWeight: "600",
     },
     actions: {
       marginTop: scale(10),
@@ -301,11 +430,20 @@ const createStyles = (fontScale) => {
       backgroundColor: "#e6eef8",
       minWidth: 48,
       alignItems: "center",
+      flex: 1,
+    },
+    actionButtonDisabled: {
+      backgroundColor: "#eef2f7",
+      borderColor: "#d5d9de",
+      borderWidth: 1,
     },
     actionText: {
       fontSize: scale(14),
       fontWeight: "600",
       color: "#0b1f33",
+    },
+    actionTextDisabled: {
+      color: "#9aa4b5",
     },
     label: {
       fontSize: scale(13),
@@ -322,14 +460,12 @@ const createStyles = (fontScale) => {
       paddingTop: scale(12),
       paddingBottom: Math.max(28, scale(32)),
       alignItems: "center",
-      gap: scale(10),
+      gap: scale(14),
     },
     mic: {
       alignSelf: "center",
       width: Math.max(96, scale(88)),
-      height: Math.max(96, scale(88)),
       minWidth: 48,
-      minHeight: 48,
       borderRadius: Math.max(48, scale(44)),
       backgroundColor: "#0066cc",
       alignItems: "center",
@@ -339,6 +475,9 @@ const createStyles = (fontScale) => {
       shadowOffset: { width: 0, height: 4 },
       shadowRadius: 8,
       elevation: 4,
+      paddingVertical: scale(14),
+      paddingHorizontal: scale(18),
+      gap: scale(6),
     },
     micPressed: {
       backgroundColor: "#0055aa",
@@ -347,32 +486,29 @@ const createStyles = (fontScale) => {
       fontSize: scale(38),
       color: "#ffffff",
     },
+    micLabel: {
+      fontSize: scale(14),
+      color: "#e5ecf6",
+      fontWeight: "600",
+    },
     statusPill: {
-      backgroundColor: "#e8f0fe",
       borderRadius: 999,
       paddingHorizontal: scale(14),
-      paddingVertical: scale(8),
+      paddingVertical: scale(10),
       alignSelf: "center",
+      borderWidth: 1,
+      borderColor: "#d5dbe7",
     },
     status: {
       textAlign: "center",
       fontSize: scale(15),
-      color: "#0b1f33",
       fontWeight: "600",
     },
     debug: {
-      marginTop: scale(4),
+      marginTop: scale(8),
       fontSize: scale(12),
       color: "#0b1f33",
       textAlign: "center",
-    },
-    hint: {
-      marginTop: scale(6),
-      fontSize: scale(12),
-      color: "#1f2937",
-      opacity: 0.8,
-      textAlign: "center",
-      paddingHorizontal: scale(8),
     },
   });
 };
