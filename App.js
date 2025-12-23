@@ -1,13 +1,6 @@
-import React, { useEffect, useRef, useState } from "react";
-import {
-  View,
-  Text,
-  Pressable,
-  StyleSheet,
-  Platform,
-  Animated,
-  Easing,
-  ActivityIndicator,
+  useWindowDimensions,
+  Share,
+  Clipboard,
 } from "react-native";
 import { Audio } from "expo-av";
 import * as Speech from "expo-speech";
@@ -60,8 +53,8 @@ async function pollJob(jobId) {
 
 export default function App() {
   const recRef = useRef(null);
-  const pulse = useRef(new Animated.Value(0)).current;
-  const pulseLoop = useRef(null);
+  const { fontScale } = useWindowDimensions();
+  const styles = useMemo(() => createStyles(fontScale), [fontScale]);
 
   const [status, setStatus] = useState("Hold mic to record");
   const [debug, setDebug] = useState("");
@@ -172,116 +165,110 @@ export default function App() {
     }
   };
 
-  useEffect(() => {
-    if (isRecording) {
-      pulse.setValue(0);
-      const loop = Animated.loop(
-        Animated.sequence([
-          Animated.timing(pulse, {
-            toValue: 1,
-            duration: 900,
-            easing: Easing.out(Easing.ease),
-            useNativeDriver: true,
-          }),
-          Animated.timing(pulse, {
-            toValue: 0,
-            duration: 900,
-            easing: Easing.in(Easing.ease),
-            useNativeDriver: true,
-          }),
-        ])
-      );
-
-      loop.start();
-      pulseLoop.current = loop;
-    } else if (pulseLoop.current) {
-      pulseLoop.current.stop();
-      pulseLoop.current = null;
-      pulse.setValue(0);
+  const copyText = async (text, label) => {
+    if (!text) {
+      setStatus(`No ${label.toLowerCase()} to copy`);
+      return;
     }
-  }, [isRecording, pulse]);
-
-  const micColor = isRecording
-    ? "#ff4d6d"
-    : isUploading || isTranscribing
-    ? "#9aa3b2"
-    : "#00c9ff";
-
-  const rippleScale = pulse.interpolate({
-    inputRange: [0, 1],
-    outputRange: [1, 1.4],
-  });
-
-  const rippleOpacity = pulse.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0.2, 0],
-  });
-
-  const handlePressIn = () => {
-    if (isUploading || isTranscribing || isRecording) return;
-    start();
+    try {
+      Clipboard.setString(text);
+      setStatus(`${label} copied`);
+    } catch (e) {
+      setDebug(String(e?.message || e));
+      setStatus("Copy failed");
+    }
   };
 
-  const handlePressOut = () => {
-    if (isUploading || isTranscribing) return;
-    stop();
+  const shareText = async (text, label) => {
+    if (!text) {
+      setStatus(`No ${label.toLowerCase()} to share`);
+      return;
+    }
+    try {
+      await Share.share({ message: text, title: label });
+      setStatus(`${label} shared`);
+    } catch (e) {
+      setDebug(String(e?.message || e));
+      setStatus("Share failed");
+    }
   };
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>MyPA AI</Text>
+      <View style={styles.content}>
+        <Text style={styles.title}>MyPA AI</Text>
 
-      <View style={styles.card}>
-        <Text style={styles.label}>Transcript</Text>
-        <Text style={styles.body}>{transcript || "..."}</Text>
+        <View style={styles.card}>
+          <Text style={styles.label}>Transcript</Text>
+          <Text style={styles.body}>{transcript || "..."}</Text>
+          <View style={styles.actions}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Copy transcript"
+              onPress={() => copyText(transcript, "Transcript")}
+              style={styles.actionButton}
+            >
+              <Text style={styles.actionText}>Copy</Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Share transcript"
+              onPress={() => shareText(transcript, "Transcript")}
+              style={styles.actionButton}
+            >
+              <Text style={styles.actionText}>Share</Text>
+            </Pressable>
+          </View>
+        </View>
+
+        <View style={styles.card}>
+          <Text style={styles.label}>Reply</Text>
+          <Text style={styles.body}>{reply || "..."}</Text>
+          <View style={styles.actions}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Copy reply"
+              onPress={() => copyText(reply, "Reply")}
+              style={styles.actionButton}
+            >
+              <Text style={styles.actionText}>Copy</Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Share reply"
+              onPress={() => shareText(reply, "Reply")}
+              style={styles.actionButton}
+            >
+              <Text style={styles.actionText}>Share</Text>
+            </Pressable>
+          </View>
+        </View>
       </View>
 
-      <View style={styles.card}>
-        <Text style={styles.label}>Reply</Text>
-        <Text style={styles.body}>{reply || "..."}</Text>
-      </View>
-
-      <View style={styles.micWrapper}>
-        {isRecording && (
-          <Animated.View
-            pointerEvents="none"
-            style={[
-              styles.ripple,
-              { opacity: rippleOpacity, transform: [{ scale: rippleScale }] },
-            ]}
-          />
-        )}
-
+      <View style={styles.controls}>
         <Pressable
-          onPressIn={handlePressIn}
-          onPressOut={handlePressOut}
-          style={({ pressed }) => [
-            styles.mic,
-            {
-              backgroundColor: micColor,
-              transform: [{ scale: pressed && !isUploading && !isTranscribing ? 0.96 : 1 }],
-              opacity: isUploading || isTranscribing ? 0.65 : 1,
-            },
-          ]}
-          disabled={isUploading || isTranscribing}
+          accessibilityRole="button"
+          accessibilityLabel="Hold to record a voice message"
+          accessibilityHint="Press and hold to start recording. Release to stop and send."
+          onPressIn={start}
+          onPressOut={stop}
+          style={({ pressed }) => [styles.mic, pressed && styles.micPressed]}
         >
-          {isUploading || isTranscribing ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <Text style={styles.micText}>🎤</Text>
-          )}
+          <Text style={styles.micText}>🎤</Text>
         </Pressable>
+
+        <View style={styles.statusPill}>
+          <Text style={styles.status}>{status}</Text>
+        </View>
+
+        {!!debug && <Text style={styles.debug}>Debug: {debug}</Text>}
+
+        <Text style={styles.hint}>
+          {Platform.OS === "ios"
+            ? "iPhone: Settings → Microphone → Expo Go must be ON"
+            : "Android: App Permissions → Microphone must be Allowed"}
+        </Text>
       </View>
-
-      <Text style={styles.status}>{status}</Text>
-
-      {!!debug && <Text style={styles.debug}>Debug: {debug}</Text>}
-
-      <Text style={styles.hint}>
-        {Platform.OS === "ios"
-          ? "iPhone: Settings → Microphone → Expo Go must be ON"
-          : "Android: App Permissions → Microphone must be Allowed"}
-      </Text>
     </View>
   );
 }
@@ -324,3 +311,119 @@ const styles = StyleSheet.create({
   debug: { marginTop: 10, fontSize: 12, color: "#444" },
   hint: { marginTop: 10, fontSize: 12, opacity: 0.6, textAlign: "center" },
 });
+const createStyles = (fontScale) => {
+  const scale = (size) => Math.round(size * fontScale);
+
+  return StyleSheet.create({
+    container: {
+      flex: 1,
+      paddingHorizontal: 20,
+      paddingTop: scale(56),
+      paddingBottom: Math.max(32, scale(36)),
+      backgroundColor: "#ffffff",
+      justifyContent: "space-between",
+    },
+    content: {
+      flex: 1,
+    },
+    title: {
+      fontSize: scale(24),
+      fontWeight: "700",
+      marginBottom: scale(16),
+      color: "#0b1f33",
+    },
+    card: {
+      borderWidth: 1,
+      borderColor: "#d0d7e2",
+      borderRadius: 14,
+      padding: scale(14),
+      marginBottom: scale(12),
+      backgroundColor: "#f9fbff",
+    },
+    actions: {
+      marginTop: scale(10),
+      flexDirection: "row",
+      gap: scale(12),
+    },
+    actionButton: {
+      paddingVertical: scale(10),
+      paddingHorizontal: scale(12),
+      borderRadius: 10,
+      backgroundColor: "#e6eef8",
+      minWidth: 48,
+      alignItems: "center",
+    },
+    actionText: {
+      fontSize: scale(14),
+      fontWeight: "600",
+      color: "#0b1f33",
+    },
+    label: {
+      fontSize: scale(13),
+      marginBottom: scale(6),
+      color: "#243447",
+      letterSpacing: 0.2,
+    },
+    body: {
+      fontSize: scale(16),
+      lineHeight: scale(22),
+      color: "#0b1f33",
+    },
+    controls: {
+      paddingTop: scale(12),
+      paddingBottom: Math.max(28, scale(32)),
+      alignItems: "center",
+      gap: scale(10),
+    },
+    mic: {
+      alignSelf: "center",
+      width: Math.max(96, scale(88)),
+      height: Math.max(96, scale(88)),
+      minWidth: 48,
+      minHeight: 48,
+      borderRadius: Math.max(48, scale(44)),
+      backgroundColor: "#0066cc",
+      alignItems: "center",
+      justifyContent: "center",
+      shadowColor: "#000",
+      shadowOpacity: 0.1,
+      shadowOffset: { width: 0, height: 4 },
+      shadowRadius: 8,
+      elevation: 4,
+    },
+    micPressed: {
+      backgroundColor: "#0055aa",
+    },
+    micText: {
+      fontSize: scale(38),
+      color: "#ffffff",
+    },
+    statusPill: {
+      backgroundColor: "#e8f0fe",
+      borderRadius: 999,
+      paddingHorizontal: scale(14),
+      paddingVertical: scale(8),
+      alignSelf: "center",
+    },
+    status: {
+      textAlign: "center",
+      fontSize: scale(15),
+      color: "#0b1f33",
+      fontWeight: "600",
+    },
+    debug: {
+      marginTop: scale(4),
+      fontSize: scale(12),
+      color: "#0b1f33",
+      textAlign: "center",
+    },
+    hint: {
+      marginTop: scale(6),
+      fontSize: scale(12),
+      color: "#1f2937",
+      opacity: 0.8,
+      textAlign: "center",
+      paddingHorizontal: scale(8),
+    },
+  });
+};
